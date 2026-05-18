@@ -13,7 +13,6 @@ const PORT = process.env.PORT || 5000;
 
 const app = express();
 
-
 app.use(cors());
 app.use(express.json());
 
@@ -27,12 +26,22 @@ const client = new MongoClient(uri, {
 
 async function run() {
   try {
-  
     await client.connect();
     
     const database = client.db("VeloDrive");
     const usersCollection = database.collection("users");
+    const carsCollection = database.collection("cars"); 
 
+   
+app.get('/cars', async (req, res) => {
+  try {
+    
+    const result = await carsCollection.find().toArray();
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ message: "Failed to fetch cars", error: error.message });
+  }
+});
  
     app.post('/users', async (req, res) => {
       try {
@@ -44,22 +53,29 @@ async function run() {
       }
     });
 
-   
+    
+    app.post('/cars', async (req, res) => {
+      try {
+        const car = req.body;
+        const result = await carsCollection.insertOne(car);
+        res.status(201).send(result); 
+      } catch (error) {
+        res.status(500).send({ message: "Failed to insert car", error: error.message });
+      }
+    });
+
     await client.db("admin").command({ ping: 1 });
     console.log("Pinged your deployment. You successfully connected to MongoDB!");
 
   } catch (error) {
     console.error("Database connection error:", error);
   }
-  
 }
 run().catch(console.dir);
-
 
 app.get('/', (req, res) => {
   res.send('VeloDrive Server is Running Successfully!');
 });
-
 
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
