@@ -4,7 +4,8 @@ dns.setServers(["8.8.8.8", "8.8.4.4"]);
 const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
-const { MongoClient, ServerApiVersion } = require('mongodb');
+// 🚀 মঙ্গোডিবি থেকে আইডি দিয়ে ডেটা খোঁজার জন্য ObjectId ইম্পোর্ট করা হলো
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 
 dotenv.config();
 
@@ -31,17 +32,49 @@ async function run() {
     const database = client.db("VeloDrive");
     const usersCollection = database.collection("users");
     const carsCollection = database.collection("cars"); 
+    const bookingsCollection = database.collection("bookings"); // 🚀 বুকিং কালেকশন
 
-   
-app.get('/cars', async (req, res) => {
-  try {
+    // 🟢 ১. সব কার বা গাড়ি একসাথে খোঁজার রাউট (সার্চ ও ফিল্টারসহ)
+    app.get('/cars', async (req, res) => {
+      try {
+        const { search, type } = req.query;
+        let query = {};
+
+        if (search) {
+          query.name = { $regex: search, $options: "i" };
+        }
+        if (type && type !== "All") {
+          query.type = type;
+        }
+
+        const result = await carsCollection.find(query).toArray();
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: "Failed to fetch cars", error: error.message });
+      }
+    });
+
     
-    const result = await carsCollection.find().toArray();
-    res.send(result);
-  } catch (error) {
-    res.status(500).send({ message: "Failed to fetch cars", error: error.message });
-  }
-});
+    app.get('/cars/:id', async (req, res) => {
+      try {
+        const id = req.params.id;
+
+        if (!ObjectId.isValid(id)) {
+          return res.status(400).send({ message: "Invalid Car ID format" });
+        }
+
+        const query = { _id: new ObjectId(id) };
+        const result = await carsCollection.findOne(query);
+
+        if (!result) {
+          return res.status(404).send({ message: "Car not found" });
+        }
+
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: "Failed to fetch car details", error: error.message });
+      }
+    });
  
     app.post('/users', async (req, res) => {
       try {
@@ -61,6 +94,31 @@ app.get('/cars', async (req, res) => {
         res.status(201).send(result); 
       } catch (error) {
         res.status(500).send({ message: "Failed to insert car", error: error.message });
+      }
+    });
+
+    
+    app.post('/bookings', async (req, res) => {
+      try {
+        const bookingData = req.body;
+        const result = await bookingsCollection.insertOne(bookingData);
+        res.status(201).send(result);
+      } catch (error) {
+        res.status(500).send({ message: "Failed to complete booking", error: error.message });
+      }
+    });
+
+    
+    app.get('/bookings/:userId', async (req, res) => {
+      try {
+        const userId = req.params.userId;
+        
+        let query = { userId: userId };
+
+        const result = await bookingsCollection.find(query).toArray();
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: "Failed to fetch user bookings", error: error.message });
       }
     });
 
