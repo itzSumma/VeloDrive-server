@@ -34,7 +34,7 @@ async function run() {
     const carsCollection = database.collection("cars"); 
     const bookingsCollection = database.collection("bookings"); 
 
-   
+    // 🏎️ Get All Cars with Search and Type Filter
     app.get('/cars', async (req, res) => {
       try {
         const { search, type } = req.query;
@@ -54,7 +54,7 @@ async function run() {
       }
     });
 
-    
+    // 🔍 Get Single Car Details
     app.get('/cars/:id', async (req, res) => {
       try {
         const id = req.params.id;
@@ -76,25 +76,26 @@ async function run() {
       }
     });
 
-    // 🎯 নির্দিষ্ট ইউজারের ইমেইল অনুযায়ী বুকিং ডাটা ফিল্টার করে নিয়ে আসার API
-// URL format: http://localhost:5000/bookings?email=user@example.com
-app.get('/bookings', async (req, res) => {
-  try {
-    const email = req.query.email;
-    let query = {};
+    // 🎯 My Bookings: নির্দিষ্ট ইউজারের ইমেইল অনুযায়ী বুকিং ডাটা ফিল্টার করে নিয়ে আসার API
+    // URL format: http://localhost:5000/bookings?email=user@example.com
+    app.get('/bookings', async (req, res) => {
+      try {
+        const email = req.query.email;
+        let query = {};
 
-    // ফ্রন্টএন্ড থেকে যদি ইমেইল পাঠানো হয়, তবে শুধু সেই ইউজারের ডাটা ফিল্টার হবে
-    if (email) {
-      query = { userEmail: email };
-    }
+        // ফ্রন্টএন্ড থেকে যদি ইমেইল পাঠানো হয়, তবে শুধু সেই ইউজারের ডাটা ফিল্টার হবে
+        if (email) {
+          query = { userEmail: email };
+        }
 
-    const result = await bookingsCollection.find(query).toArray();
-    res.send(result);
-  } catch (error) {
-    res.status(500).send({ message: "Failed to fetch user bookings", error: error.message });
-  }
-});
+        const result = await bookingsCollection.find(query).toArray();
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: "Failed to fetch user bookings", error: error.message });
+      }
+    });
  
+    // 👤 Create/Insert User
     app.post('/users', async (req, res) => {
       try {
         const user = req.body;
@@ -105,7 +106,7 @@ app.get('/bookings', async (req, res) => {
       }
     });
 
-    
+    // ➕ Add a New Car
     app.post('/cars', async (req, res) => {
       try {
         const car = req.body;
@@ -116,28 +117,25 @@ app.get('/bookings', async (req, res) => {
       }
     });
 
-    
+    // 📅 Create a New Booking & Update Car Booking Count
     app.post('/bookings', async (req, res) => {
       try {
         const bookingData = req.body;
+        
+        // ১. বুকিং ডেটা কালেকশনে ইনসার্ট করা
         const result = await bookingsCollection.insertOne(bookingData);
+        
+        // ২. 🎯 অ্যাসাইনমেন্ট চ্যালেঞ্জ: $inc অপারেটর ব্যবহার করে গাড়ির booking_count ফিল্ড ১ বাড়ানো
+        if (bookingData.carId && ObjectId.isValid(bookingData.carId)) {
+          await carsCollection.updateOne(
+            { _id: new ObjectId(bookingData.carId) },
+            { $inc: { booking_count: 1 } }
+          );
+        }
+        
         res.status(201).send(result);
       } catch (error) {
         res.status(500).send({ message: "Failed to complete booking", error: error.message });
-      }
-    });
-
-    
-    app.get('/bookings/:userId', async (req, res) => {
-      try {
-        const userId = req.params.userId;
-        
-        let query = { userId: userId };
-
-        const result = await bookingsCollection.find(query).toArray();
-        res.send(result);
-      } catch (error) {
-        res.status(500).send({ message: "Failed to fetch user bookings", error: error.message });
       }
     });
 
