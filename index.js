@@ -139,6 +139,21 @@ async function run() {
       }
     });
 
+    app.get('/my-added-cars', async (req, res) => {
+      try {
+        const email = req.query.email;
+        if (!email) {
+          return res.status(400).send({ message: "Email is required" });
+        }
+        // শুধু ওই ইউজারের ইমেইল দিয়ে ডাটাবেজ থেকে গাড়িগুলো ফিল্টার করা হচ্ছে
+        const query = { ownerEmail: email };
+        const result = await carsCollection.find(query).toArray();
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: "Failed to fetch your cars", error: error.message });
+      }
+    });
+
     await client.db("admin").command({ ping: 1 });
     console.log("Pinged your deployment. You successfully connected to MongoDB!");
 
