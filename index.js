@@ -154,6 +154,40 @@ async function run() {
       }
     });
 
+    // 🛠️ Update a Car Details
+app.put('/cars/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const updatedCarData = req.body;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).send({ message: "Invalid Car ID format" });
+    }
+
+    const filter = { _id: new ObjectId(id) };
+    
+    // যে ফিল্ডগুলো ইউজার আপডেট করতে পারবে (Price, Description, Availability, etc.)
+    const updateDoc = {
+      $set: {
+        dailyRentPrice: updatedCarData.dailyRentPrice,
+        availability: updatedCarData.availability,
+        description: updatedCarData.description,
+        // আপনার ডাটাবেজে অন্য ফিল্ড থাকলে সেগুলোও এখানে যোগ করতে পারেন
+      },
+    };
+
+    const result = await carsCollection.updateOne(filter, updateDoc);
+
+    if (result.matchedCount === 0) {
+      return res.status(404).send({ message: "Car not found" });
+    }
+
+    res.send({ message: "Car updated successfully", result });
+  } catch (error) {
+    res.status(500).send({ message: "Failed to update car", error: error.message });
+  }
+});
+
     await client.db("admin").command({ ping: 1 });
     console.log("Pinged your deployment. You successfully connected to MongoDB!");
 
