@@ -4,7 +4,7 @@ dns.setServers(["8.8.8.8", "8.8.4.4"]);
 const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
-// 🚀 মঙ্গোডিবি থেকে আইডি দিয়ে ডেটা খোঁজার জন্য ObjectId ইম্পোর্ট করা হলো
+
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 
 dotenv.config();
@@ -32,9 +32,9 @@ async function run() {
     const database = client.db("VeloDrive");
     const usersCollection = database.collection("users");
     const carsCollection = database.collection("cars"); 
-    const bookingsCollection = database.collection("bookings"); // 🚀 বুকিং কালেকশন
+    const bookingsCollection = database.collection("bookings"); 
 
-    // 🟢 ১. সব কার বা গাড়ি একসাথে খোঁজার রাউট (সার্চ ও ফিল্টারসহ)
+   
     app.get('/cars', async (req, res) => {
       try {
         const { search, type } = req.query;
