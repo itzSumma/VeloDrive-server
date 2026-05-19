@@ -75,6 +75,25 @@ async function run() {
         res.status(500).send({ message: "Failed to fetch car details", error: error.message });
       }
     });
+
+    // 🎯 নির্দিষ্ট ইউজারের ইমেইল অনুযায়ী বুকিং ডাটা ফিল্টার করে নিয়ে আসার API
+// URL format: http://localhost:5000/bookings?email=user@example.com
+app.get('/bookings', async (req, res) => {
+  try {
+    const email = req.query.email;
+    let query = {};
+
+    // ফ্রন্টএন্ড থেকে যদি ইমেইল পাঠানো হয়, তবে শুধু সেই ইউজারের ডাটা ফিল্টার হবে
+    if (email) {
+      query = { userEmail: email };
+    }
+
+    const result = await bookingsCollection.find(query).toArray();
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ message: "Failed to fetch user bookings", error: error.message });
+  }
+});
  
     app.post('/users', async (req, res) => {
       try {
