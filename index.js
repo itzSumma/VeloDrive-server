@@ -1,21 +1,51 @@
 const dns = require("node:dns");
-dns.setServers(["8.8.8.8", "8.8.4.4"]); 
+dns.setServers(["8.8.8.8", "8.8.4.4"]);
 
 const express = require('express');
 const cors = require('cors');
+const cookieParser = require('cookie-parser');
 const dotenv = require('dotenv');
+const jwt = require('jsonwebtoken');
 
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 
 dotenv.config();
 
 const uri = process.env.MONGODB_URI;
-const PORT = process.env.PORT || 5000; 
+const PORT = process.env.PORT || 5000;
+const jwtSecret = process.env.JWT_ACCESS_SECRET || process.env.BETTER_AUTH_SECRET;
 
 const app = express();
 
-app.use(cors());
+app.use(
+  cors({
+    origin: true,
+    credentials: true,
+  })
+);
+app.use(cookieParser());
 app.use(express.json());
+
+const verifyToken = (req, res, next) => {
+  if (!jwtSecret) {
+    return res.status(500).send({ message: "JWT secret is not configured" });
+  }
+
+  const token = req.cookies?.token;
+
+  if (!token) {
+    return res.status(401).send({ message: "Unauthorized access" });
+  }
+
+  jwt.verify(token, jwtSecret, (error, decoded) => {
+    if (error) {
+      return res.status(401).send({ message: "Unauthorized access" });
+    }
+
+    req.decoded = decoded;
+    next();
+  });
+};
 
 const client = new MongoClient(uri, {
   serverApi: {
@@ -28,24 +58,73 @@ const client = new MongoClient(uri, {
 async function run() {
   try {
     await client.connect();
-    
+
     const database = client.db("VeloDrive");
     const usersCollection = database.collection("users");
-    const carsCollection = database.collection("cars"); 
-    const bookingsCollection = database.collection("bookings"); 
+    const carsCollection = database.collection("cars");
+    const bookingsCollection = database.collection("bookings");
 
-    // 🏎️ Get All Cars with Search and Type Filter
+    app.post('/jwt', async (req, res) => {
+      try {
+        if (!jwtSecret) {
+          return res.status(500).send({ message: "JWT secret is not configured" });
+        }
+
+        const user = req.body;
+
+        if (!user?.email) {
+          return res.status(400).send({ message: "User email is required" });
+        }
+
+        const token = jwt.sign({ email: user.email }, jwtSecret, { expiresIn: '7d' });
+
+        res
+          .cookie('token', token, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+          })
+          .send({ success: true });
+      } catch (error) {
+        res.status(500).send({ message: "Failed to generate token", error: error.message });
+      }
+    });
+
+    app.post('/logout', async (req, res) => {
+      res
+        .clearCookie('token', {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === 'production',
+          sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+        })
+        .send({ success: true });
+    });
+
+    // Get All Cars with Search and Type Filter
     app.get('/cars', async (req, res) => {
       try {
         const { search, type } = req.query;
-        let query = {};
+        const filters = [];
 
         if (search) {
-          query.name = { $regex: search, $options: "i" };
+          filters.push({
+            $or: [
+              { name: { $regex: search, $options: "i" } },
+              { carModel: { $regex: search, $options: "i" } },
+            ],
+          });
         }
+
         if (type && type !== "All") {
-          query.type = type;
+          filters.push({
+            $or: [
+              { type: { $in: [type] } },
+              { carType: { $in: [type] } },
+            ],
+          });
         }
+
+        const query = filters.length > 0 ? { $and: filters } : {};
 
         const result = await carsCollection.find(query).toArray();
         res.send(result);
@@ -54,7 +133,7 @@ async function run() {
       }
     });
 
-    // 🔍 Get Single Car Details
+    // Get Single Car Details
     app.get('/cars/:id', async (req, res) => {
       try {
         const id = req.params.id;
@@ -76,26 +155,28 @@ async function run() {
       }
     });
 
-    // 🎯 My Bookings: নির্দিষ্ট ইউজারের ইমেইল অনুযায়ী বুকিং ডাটা ফিল্টার করে নিয়ে আসার API
-    // URL format: http://localhost:5000/bookings?email=user@example.com
-    app.get('/bookings', async (req, res) => {
+    // My Bookings
+    app.get('/bookings', verifyToken, async (req, res) => {
       try {
         const email = req.query.email;
-        let query = {};
 
-        // ফ্রন্টএন্ড থেকে যদি ইমেইল পাঠানো হয়, তবে শুধু সেই ইউজারের ডাটা ফিল্টার হবে
-        if (email) {
-          query = { userEmail: email };
+        if (!email) {
+          return res.status(400).send({ message: "Email is required" });
         }
 
+        if (req.decoded.email !== email) {
+          return res.status(403).send({ message: "Forbidden access" });
+        }
+
+        const query = { userEmail: email };
         const result = await bookingsCollection.find(query).toArray();
         res.send(result);
       } catch (error) {
         res.status(500).send({ message: "Failed to fetch user bookings", error: error.message });
       }
     });
- 
-    // 👤 Create/Insert User
+
+    // Create/Insert User
     app.post('/users', async (req, res) => {
       try {
         const user = req.body;
@@ -106,46 +187,58 @@ async function run() {
       }
     });
 
-    // ➕ Add a New Car
-    app.post('/cars', async (req, res) => {
+    // Add a New Car
+    app.post('/cars', verifyToken, async (req, res) => {
       try {
         const car = req.body;
+
+        if (car?.ownerEmail && car.ownerEmail !== req.decoded.email) {
+          return res.status(403).send({ message: "Forbidden access" });
+        }
+
         const result = await carsCollection.insertOne(car);
-        res.status(201).send(result); 
+        res.status(201).send(result);
       } catch (error) {
         res.status(500).send({ message: "Failed to insert car", error: error.message });
       }
     });
 
-    // 📅 Create a New Booking & Update Car Booking Count
-    app.post('/bookings', async (req, res) => {
+    // Create a New Booking & Update Car Booking Count
+    app.post('/bookings', verifyToken, async (req, res) => {
       try {
         const bookingData = req.body;
-        
-        // ১. বুকিং ডেটা কালেকশনে ইনসার্ট করা
+
+        if (bookingData?.userEmail !== req.decoded.email) {
+          return res.status(403).send({ message: "Forbidden access" });
+        }
+
         const result = await bookingsCollection.insertOne(bookingData);
-        
-        // ২. 🎯 অ্যাসাইনমেন্ট চ্যালেঞ্জ: $inc অপারেটর ব্যবহার করে গাড়ির booking_count ফিল্ড ১ বাড়ানো
+
         if (bookingData.carId && ObjectId.isValid(bookingData.carId)) {
           await carsCollection.updateOne(
             { _id: new ObjectId(bookingData.carId) },
             { $inc: { booking_count: 1 } }
           );
         }
-        
+
         res.status(201).send(result);
       } catch (error) {
         res.status(500).send({ message: "Failed to complete booking", error: error.message });
       }
     });
 
-    app.get('/my-added-cars', async (req, res) => {
+    app.get('/my-added-cars', verifyToken, async (req, res) => {
       try {
         const email = req.query.email;
+
         if (!email) {
           return res.status(400).send({ message: "Email is required" });
         }
-        // শুধু ওই ইউজারের ইমেইল দিয়ে ডাটাবেজ থেকে গাড়িগুলো ফিল্টার করা হচ্ছে
+
+        if (req.decoded.email !== email) {
+          return res.status(403).send({ message: "Forbidden access" });
+        }
+
         const query = { ownerEmail: email };
         const result = await carsCollection.find(query).toArray();
         res.send(result);
@@ -154,61 +247,68 @@ async function run() {
       }
     });
 
-    // 🛠️ Update a Car Details
-app.put('/cars/:id', async (req, res) => {
-  try {
-    const id = req.params.id;
-    const updatedCarData = req.body;
+    // Update a Car Details
+    app.put('/cars/:id', verifyToken, async (req, res) => {
+      try {
+        const id = req.params.id;
+        const updatedCarData = req.body;
 
-    if (!ObjectId.isValid(id)) {
-      return res.status(400).send({ message: "Invalid Car ID format" });
-    }
+        if (!ObjectId.isValid(id)) {
+          return res.status(400).send({ message: "Invalid Car ID format" });
+        }
 
-    const filter = { _id: new ObjectId(id) };
-    
-    // যে ফিল্ডগুলো ইউজার আপডেট করতে পারবে (Price, Description, Availability, etc.)
-    const updateDoc = {
-      $set: {
-        dailyRentPrice: updatedCarData.dailyRentPrice,
-        availability: updatedCarData.availability,
-        description: updatedCarData.description,
-        // আপনার ডাটাবেজে অন্য ফিল্ড থাকলে সেগুলোও এখানে যোগ করতে পারেন
-      },
-    };
+        const filter = { _id: new ObjectId(id) };
+        const existingCar = await carsCollection.findOne(filter);
 
-    const result = await carsCollection.updateOne(filter, updateDoc);
+        if (!existingCar) {
+          return res.status(404).send({ message: "Car not found" });
+        }
 
-    if (result.matchedCount === 0) {
-      return res.status(404).send({ message: "Car not found" });
-    }
+        if (existingCar.ownerEmail !== req.decoded.email) {
+          return res.status(403).send({ message: "Forbidden access" });
+        }
 
-    res.send({ message: "Car updated successfully", result });
-  } catch (error) {
-    res.status(500).send({ message: "Failed to update car", error: error.message });
-  }
-});
+        const updateDoc = {
+          $set: {
+            dailyRentPrice: updatedCarData.dailyRentPrice,
+            availability: updatedCarData.availability,
+            description: updatedCarData.description,
+          },
+        };
 
-// 🗑️ Delete a Car
-app.delete('/cars/:id', async (req, res) => {
-  try {
-    const id = req.params.id;
+        const result = await carsCollection.updateOne(filter, updateDoc);
+        res.send({ message: "Car updated successfully", result });
+      } catch (error) {
+        res.status(500).send({ message: "Failed to update car", error: error.message });
+      }
+    });
 
-    if (!ObjectId.isValid(id)) {
-      return res.status(400).send({ message: "Invalid Car ID format" });
-    }
+    // Delete a Car
+    app.delete('/cars/:id', verifyToken, async (req, res) => {
+      try {
+        const id = req.params.id;
 
-    const query = { _id: new ObjectId(id) };
-    const result = await carsCollection.deleteOne(query);
+        if (!ObjectId.isValid(id)) {
+          return res.status(400).send({ message: "Invalid Car ID format" });
+        }
 
-    if (result.deletedCount === 0) {
-      return res.status(404).send({ message: "Car not found" });
-    }
+        const query = { _id: new ObjectId(id) };
+        const existingCar = await carsCollection.findOne(query);
 
-    res.send({ message: "Car deleted successfully", result });
-  } catch (error) {
-    res.status(500).send({ message: "Failed to delete car", error: error.message });
-  }
-});
+        if (!existingCar) {
+          return res.status(404).send({ message: "Car not found" });
+        }
+
+        if (existingCar.ownerEmail !== req.decoded.email) {
+          return res.status(403).send({ message: "Forbidden access" });
+        }
+
+        const result = await carsCollection.deleteOne(query);
+        res.send({ message: "Car deleted successfully", result });
+      } catch (error) {
+        res.status(500).send({ message: "Failed to delete car", error: error.message });
+      }
+    });
 
     await client.db("admin").command({ ping: 1 });
     console.log("Pinged your deployment. You successfully connected to MongoDB!");
