@@ -169,7 +169,7 @@ app.use(async (req, res, next) => {
         res.status(500).send({ message: "Failed to fetch car details", error: error.message });
       }
     });
-
+ 
     // My Bookings
     app.get('/bookings', verifyToken, async (req, res) => {
       try {
