@@ -203,7 +203,7 @@ app.use(async (req, res, next) => {
     });
 
     // Add a New Car
-    app.post('/cars', verifyToken, async (req, res) => {
+    app.post('/cars',  async (req, res) => {
       try {
         const car = req.body;
 
@@ -219,7 +219,7 @@ app.use(async (req, res, next) => {
     });
 
     // Create a New Booking & Update Car Booking Count
-    app.post('/bookings', verifyToken, async (req, res) => {
+    app.post('/bookings',  async (req, res) => {
       try {
         const bookingData = req.body;
 
@@ -242,7 +242,7 @@ app.use(async (req, res, next) => {
       }
     });
 
-    app.get('/my-added-cars', verifyToken, async (req, res) => {
+    app.get('/my-added-cars',  async (req, res) => {
       try {
         const email = req.query.email;
 
@@ -263,7 +263,7 @@ app.use(async (req, res, next) => {
     });
 
     // Update a Car Details
-    app.put('/cars/:id', verifyToken, async (req, res) => {
+    app.put('/cars/:id', async (req, res) => {
       try {
         const id = req.params.id;
         const updatedCarData = req.body;
@@ -299,7 +299,7 @@ app.use(async (req, res, next) => {
     });
 
     // Delete a Car
-    app.delete('/cars/:id', verifyToken, async (req, res) => {
+    app.delete('/cars/:id',  async (req, res) => {
       try {
         const id = req.params.id;
 
