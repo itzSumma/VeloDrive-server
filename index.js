@@ -1,5 +1,4 @@
-const dns = require("node:dns");
-dns.setServers(["8.8.8.8", "8.8.4.4"]);
+
 
 const express = require('express');
 const cors = require('cors');
@@ -55,14 +54,30 @@ const client = new MongoClient(uri, {
   }
 });
 
-async function run() {
-  try {
-    await client.connect();
+const database = client.db("VeloDrive");
+const usersCollection = database.collection("users");
+const carsCollection = database.collection("cars");
+const bookingsCollection = database.collection("bookings");
 
-    const database = client.db("VeloDrive");
-    const usersCollection = database.collection("users");
-    const carsCollection = database.collection("cars");
-    const bookingsCollection = database.collection("bookings");
+let isConnected = false;
+async function connectToDatabase() {
+  if (isConnected) return;
+  await client.connect();
+  isConnected = true;
+  console.log("Successfully connected to MongoDB!");
+}
+
+// Middleware to ensure DB connection is active before processing requests
+app.use(async (req, res, next) => {
+  try {
+    await connectToDatabase();
+    next();
+  } catch (error) {
+    console.error("Database connection middleware error:", error);
+    res.status(500).send({ message: "Failed to connect to database", error: error.message });
+  }
+});
+
 
     app.post('/jwt', async (req, res) => {
       try {
@@ -310,19 +325,17 @@ async function run() {
       }
     });
 
-    await client.db("admin").command({ ping: 1 });
-    console.log("Pinged your deployment. You successfully connected to MongoDB!");
+    // Connection is now managed dynamically via middleware for Serverless compatibility
 
-  } catch (error) {
-    console.error("Database connection error:", error);
-  }
-}
-run().catch(console.dir);
 
 app.get('/', (req, res) => {
   res.send('VeloDrive Server is Running Successfully!');
 });
 
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-});
+if (process.env.NODE_ENV !== 'production') {
+  app.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
+  });
+}
+
+module.exports = app;
