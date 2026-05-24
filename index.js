@@ -2,9 +2,7 @@
 
 const express = require('express');
 const cors = require('cors');
-const cookieParser = require('cookie-parser');
 const dotenv = require('dotenv');
-const jwt = require('jsonwebtoken');
 
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 
@@ -12,7 +10,6 @@ dotenv.config();
 
 const uri = process.env.MONGODB_URI;
 const PORT = process.env.PORT || 5000;
-const jwtSecret = process.env.JWT_ACCESS_SECRET || process.env.BETTER_AUTH_SECRET;
 
 const app = express();
 
@@ -22,29 +19,9 @@ app.use(
     credentials: true,
   })
 );
-app.use(cookieParser());
 app.use(express.json());
 
-const verifyToken = (req, res, next) => {
-  if (!jwtSecret) {
-    return res.status(500).send({ message: "JWT secret is not configured" });
-  }
 
-  const token = req.cookies?.token;
-
-  if (!token) {
-    return res.status(401).send({ message: "Unauthorized access" });
-  }
-
-  jwt.verify(token, jwtSecret, (error, decoded) => {
-    if (error) {
-      return res.status(401).send({ message: "Unauthorized access" });
-    }
-
-    req.decoded = decoded;
-    next();
-  });
-};
 
 const client = new MongoClient(uri, {
   serverApi: {
@@ -79,41 +56,7 @@ app.use(async (req, res, next) => {
 });
 
 
-    app.post('/jwt', async (req, res) => {
-      try {
-        if (!jwtSecret) {
-          return res.status(500).send({ message: "JWT secret is not configured" });
-        }
 
-        const user = req.body;
-
-        if (!user?.email) {
-          return res.status(400).send({ message: "User email is required" });
-        }
-
-        const token = jwt.sign({ email: user.email }, jwtSecret, { expiresIn: '7d' });
-
-        res
-          .cookie('token', token, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-          })
-          .send({ success: true });
-      } catch (error) {
-        res.status(500).send({ message: "Failed to generate token", error: error.message });
-      }
-    });
-
-    app.post('/logout', async (req, res) => {
-      res
-        .clearCookie('token', {
-          httpOnly: true,
-          secure: process.env.NODE_ENV === 'production',
-          sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-        })
-        .send({ success: true });
-    });
 
     // Get All Cars with Search and Type Filter
     app.get('/cars', async (req, res) => {
@@ -171,16 +114,12 @@ app.use(async (req, res, next) => {
     });
 
     // My Bookings
-    app.get('/bookings', verifyToken, async (req, res) => {
+    app.get('/bookings', async (req, res) => {
       try {
         const email = req.query.email;
 
         if (!email) {
           return res.status(400).send({ message: "Email is required" });
-        }
-
-        if (req.decoded.email !== email) {
-          return res.status(403).send({ message: "Forbidden access" });
         }
 
         const query = { userEmail: email };
@@ -203,13 +142,9 @@ app.use(async (req, res, next) => {
     });
 
     // Add a New Car
-    app.post('/cars',  async (req, res) => {
+    app.post('/cars', async (req, res) => {
       try {
         const car = req.body;
-
-        if (car?.ownerEmail && car.ownerEmail !== req.decoded.email) {
-          return res.status(403).send({ message: "Forbidden access" });
-        }
 
         const result = await carsCollection.insertOne(car);
         res.status(201).send(result);
@@ -219,13 +154,9 @@ app.use(async (req, res, next) => {
     });
 
     // Create a New Booking & Update Car Booking Count
-    app.post('/bookings',  async (req, res) => {
+    app.post('/bookings', async (req, res) => {
       try {
         const bookingData = req.body;
-
-        if (bookingData?.userEmail !== req.decoded.email) {
-          return res.status(403).send({ message: "Forbidden access" });
-        }
 
         const result = await bookingsCollection.insertOne(bookingData);
 
@@ -242,16 +173,12 @@ app.use(async (req, res, next) => {
       }
     });
 
-    app.get('/my-added-cars',  async (req, res) => {
+    app.get('/my-added-cars', async (req, res) => {
       try {
         const email = req.query.email;
 
         if (!email) {
           return res.status(400).send({ message: "Email is required" });
-        }
-
-        if (req.decoded.email !== email) {
-          return res.status(403).send({ message: "Forbidden access" });
         }
 
         const query = { ownerEmail: email };
@@ -279,10 +206,6 @@ app.use(async (req, res, next) => {
           return res.status(404).send({ message: "Car not found" });
         }
 
-        if (existingCar.ownerEmail !== req.decoded.email) {
-          return res.status(403).send({ message: "Forbidden access" });
-        }
-
         const updateDoc = {
           $set: {
             dailyRentPrice: updatedCarData.dailyRentPrice,
@@ -299,7 +222,7 @@ app.use(async (req, res, next) => {
     });
 
     // Delete a Car
-    app.delete('/cars/:id',  async (req, res) => {
+    app.delete('/cars/:id', async (req, res) => {
       try {
         const id = req.params.id;
 
@@ -312,10 +235,6 @@ app.use(async (req, res, next) => {
 
         if (!existingCar) {
           return res.status(404).send({ message: "Car not found" });
-        }
-
-        if (existingCar.ownerEmail !== req.decoded.email) {
-          return res.status(403).send({ message: "Forbidden access" });
         }
 
         const result = await carsCollection.deleteOne(query);
