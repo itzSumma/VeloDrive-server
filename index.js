@@ -5,6 +5,7 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const { createRemoteJWKSet, jwtVerify } = require('jose-cjs');
 
 dotenv.config();
 
@@ -15,7 +16,7 @@ const app = express();
 
 app.use(
   cors({
-    origin: true,
+    origin: process.env.CLIENT_URL || 'https://velo-drive-client-kappa.vercel.app',
     credentials: true,
   })
 );
@@ -35,6 +36,9 @@ const database = client.db("VeloDrive");
 const usersCollection = database.collection("users");
 const carsCollection = database.collection("cars");
 const bookingsCollection = database.collection("bookings");
+const JWKS = createRemoteJWKSet(
+  new URL(`${process.env.CLIENT_URL || 'https://velo-drive-client-kappa.vercel.app'}/api/auth/jwks`)
+);
 
 let isConnected = false;
 async function connectToDatabase() {
@@ -54,6 +58,26 @@ app.use(async (req, res, next) => {
     res.status(500).send({ message: "Failed to connect to database", error: error.message });
   }
 });
+
+const verifyToken = async (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+
+  if (!token) {
+    return res.status(401).send({ message: 'Authentication is required.' });
+  }
+
+  try {
+    const { payload } = await jwtVerify(token, JWKS);
+    if (!payload.email) {
+      return res.status(403).send({ message: 'Token does not contain a user email.' });
+    }
+    req.user = payload;
+    next();
+  } catch (error) {
+    return res.status(403).send({ message: 'Invalid or expired token.' });
+  }
+};
 
 
 
@@ -114,15 +138,9 @@ app.use(async (req, res, next) => {
     });
 
     // My Bookings
-    app.get('/bookings', async (req, res) => {
+    app.get('/bookings', verifyToken, async (req, res) => {
       try {
-        const email = req.query.email;
-
-        if (!email) {
-          return res.status(400).send({ message: "Email is required" });
-        }
-
-        const query = { userEmail: email };
+        const query = { userEmail: req.user.email };
         const result = await bookingsCollection.find(query).toArray();
         res.send(result);
       } catch (error) {
@@ -142,9 +160,14 @@ app.use(async (req, res, next) => {
     });
 
     // Add a New Car
-    app.post('/cars', async (req, res) => {
+    app.post('/cars', verifyToken, async (req, res) => {
       try {
-        const car = req.body;
+        const car = {
+          ...req.body,
+          ownerEmail: req.user.email,
+          ownerId: req.user.sub,
+          booking_count: 0,
+        };
 
         const result = await carsCollection.insertOne(car);
         res.status(201).send(result);
@@ -154,18 +177,37 @@ app.use(async (req, res, next) => {
     });
 
     // Create a New Booking & Update Car Booking Count
-    app.post('/bookings', async (req, res) => {
+    app.post('/bookings', verifyToken, async (req, res) => {
       try {
-        const bookingData = req.body;
+        const { carId, driverNeeded, specialNote } = req.body;
+        if (!ObjectId.isValid(carId)) {
+          return res.status(400).send({ message: 'Invalid car ID format.' });
+        }
+
+        const car = await carsCollection.findOne({ _id: new ObjectId(carId) });
+        if (!car) return res.status(404).send({ message: 'Car not found.' });
+        if (car.availability !== 'available') {
+          return res.status(400).send({ message: 'This car is not available for booking.' });
+        }
+
+        const bookingData = {
+          carId,
+          carName: car.name,
+          carImage: car.image,
+          driverNeeded: driverNeeded === 'Yes' ? 'Yes' : 'No',
+          specialNote: specialNote || '',
+          totalPrice: car.dailyRentPrice,
+          bookingDate: new Date(),
+          userEmail: req.user.email,
+          userId: req.user.sub,
+        };
 
         const result = await bookingsCollection.insertOne(bookingData);
 
-        if (bookingData.carId && ObjectId.isValid(bookingData.carId)) {
-          await carsCollection.updateOne(
-            { _id: new ObjectId(bookingData.carId) },
-            { $inc: { booking_count: 1 } }
-          );
-        }
+        await carsCollection.updateOne(
+          { _id: new ObjectId(carId) },
+          { $inc: { booking_count: 1 } }
+        );
 
         res.status(201).send(result);
       } catch (error) {
@@ -173,15 +215,9 @@ app.use(async (req, res, next) => {
       }
     });
 
-    app.get('/my-added-cars', async (req, res) => {
+    app.get('/my-added-cars', verifyToken, async (req, res) => {
       try {
-        const email = req.query.email;
-
-        if (!email) {
-          return res.status(400).send({ message: "Email is required" });
-        }
-
-        const query = { ownerEmail: email };
+        const query = { ownerEmail: req.user.email };
         const result = await carsCollection.find(query).toArray();
         res.send(result);
       } catch (error) {
@@ -190,7 +226,7 @@ app.use(async (req, res, next) => {
     });
 
     // Update a Car Details
-    app.put('/cars/:id', async (req, res) => {
+    app.put('/cars/:id', verifyToken, async (req, res) => {
       try {
         const id = req.params.id;
         const updatedCarData = req.body;
@@ -205,9 +241,15 @@ app.use(async (req, res, next) => {
         if (!existingCar) {
           return res.status(404).send({ message: "Car not found" });
         }
+        if (existingCar.ownerEmail !== req.user.email) {
+          return res.status(403).send({ message: 'You can only update your own cars.' });
+        }
 
         const updateDoc = {
           $set: {
+            image: updatedCarData.image,
+            type: updatedCarData.type,
+            pickupLocation: updatedCarData.pickupLocation,
             dailyRentPrice: updatedCarData.dailyRentPrice,
             availability: updatedCarData.availability,
             description: updatedCarData.description,
@@ -222,7 +264,7 @@ app.use(async (req, res, next) => {
     });
 
     // Delete a Car
-    app.delete('/cars/:id', async (req, res) => {
+    app.delete('/cars/:id', verifyToken, async (req, res) => {
       try {
         const id = req.params.id;
 
@@ -235,6 +277,9 @@ app.use(async (req, res, next) => {
 
         if (!existingCar) {
           return res.status(404).send({ message: "Car not found" });
+        }
+        if (existingCar.ownerEmail !== req.user.email) {
+          return res.status(403).send({ message: 'You can only delete your own cars.' });
         }
 
         const result = await carsCollection.deleteOne(query);
